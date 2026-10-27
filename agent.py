@@ -1,16 +1,23 @@
+
 from openai import OpenAI
 import os
 import json
 
-client = OpenAI(api_key=os.getenv("OPENAI_API_KEY"))
-
 
 def evaluate_mission(mission, submission):
+    api_key = os.getenv("OPENAI_API_KEY")
+
+    if not api_key:
+        raise ValueError(
+            "OPENAI_API_KEY missing hai. Environment variable configure karo."
+        )
+
+    client = OpenAI(api_key=api_key)
 
     evaluation_prompt = f"""
 You are an AI Quest mission evaluation agent.
 
-Evaluate the employee's AI mission submission based ONLY on the evidence provided.
+Evaluate the employee submission using ONLY the evidence provided.
 
 MISSION:
 {mission}
@@ -18,185 +25,90 @@ MISSION:
 EMPLOYEE SUBMISSION:
 {submission}
 
-
-Evaluate these 5 criteria from 0 to 10:
-
+Score these five criteria from 0 to 10:
 1. Prompt Quality
 2. Output Quality
 3. Time Saved
 4. Fact Checking
 5. Creativity
 
-
-SCORING RULES:
-
-PROMPT QUALITY:
-Check whether the employee provides a clear, specific and useful AI prompt.
-
-OUTPUT QUALITY:
-Check whether the actual AI-generated output is provided and whether it is useful,
-relevant and appropriate for the mission.
-
-TIME SAVED:
-Use TIME BEFORE AI and TIME AFTER AI.
-Consider how much time was saved and the percentage improvement.
-
-FACT CHECKING:
-Check whether the employee explains how AI-generated information was verified
-against the original or reliable source.
-
-CREATIVITY:
-Check whether the employee used a creative, innovative or better-than-standard
-approach.
-
-IMPORTANT RULES:
-- Score ONLY using evidence in the submission.
-- Do NOT invent missing information.
-- Missing evidence should receive a low score.
-- Scores must be between 0 and 10.
-- Give a short reason for every score.
-- Do NOT calculate total_xp yourself.
-- Give practical suggestions for improving weak areas.
+Rules:
+- Use only evidence in the submission.
+- Do not invent missing information.
+- Give low scores when evidence is missing.
+- Give a short reason for each score.
+- Time Saved must use TIME BEFORE AI and TIME AFTER AI.
+- Do not calculate total_xp.
+- Give practical improvement suggestions.
 - Return valid JSON only.
 
-
 Return exactly this structure:
-
 {{
-  "prompt_quality": {{
-    "score": 0,
-    "reason": ""
-  }},
-  "output_quality": {{
-    "score": 0,
-    "reason": ""
-  }},
-  "time_saved": {{
-    "score": 0,
-    "reason": ""
-  }},
-  "fact_checking": {{
-    "score": 0,
-    "reason": ""
-  }},
-  "creativity": {{
-    "score": 0,
-    "reason": ""
-  }},
+  "prompt_quality": {{"score": 0, "reason": ""}},
+  "output_quality": {{"score": 0, "reason": ""}},
+  "time_saved": {{"score": 0, "reason": ""}},
+  "fact_checking": {{"score": 0, "reason": ""}},
+  "creativity": {{"score": 0, "reason": ""}},
   "overall_feedback": "",
-  "improvement_suggestions": [
-    "",
-    "",
-    ""
-  ]
+  "improvement_suggestions": ["", "", ""]
 }}
 """
 
-    response = client.responses.create(
-        model="gpt-6-luna",
-        input=evaluation_prompt
-    )
+    try:
+        response = client.responses.create(
+            model=os.getenv("OPENAI_MODEL", "gpt-6-luna"),
+            input=evaluation_prompt
+        )
 
-    result = json.loads(response.output_text)
+        result = json.loads(response.output_text)
 
-    criteria = [
-        "prompt_quality",
-        "output_quality",
-        "time_saved",
-        "fact_checking",
-        "creativity"
-    ]
+        criteria = [
+            "prompt_quality",
+            "output_quality",
+            "time_saved",
+            "fact_checking",
+            "creativity"
+        ]
 
-    total_xp = 0
+        total_xp = 0
 
-    for criterion in criteria:
+        for criterion in criteria:
+            if criterion not in result:
+                raise ValueError(
+                    f"AI response mein {criterion} missing hai."
+                )
 
-        score = result[criterion]["score"]
+            item = result[criterion]
 
-        score = max(0, min(10, int(score)))
+            if not isinstance(item, dict) or "score" not in item:
+                raise ValueError(
+                    f"{criterion} ka score invalid hai."
+                )
 
-        result[criterion]["score"] = score
+            score = int(item["score"])
+            score = max(0, min(10, score))
 
-        total_xp += score
+            item["score"] = score
+            item.setdefault("reason", "")
+            total_xp += score
 
-    result["total_xp"] = total_xp
+        result.setdefault("overall_feedback", "")
+        result.setdefault("improvement_suggestions", [])
+        result["total_xp"] = total_xp
 
-    return result
+        return result
+
+    except json.JSONDecodeError as error:
+        raise ValueError(
+            "AI ne valid JSON response nahi diya."
+        ) from error
+
+    except Exception as error:
+        raise RuntimeError(
+            f"Mission evaluation failed: {error}"
+        ) from error
 
 
 if __name__ == "__main__":
-
     print("AI Quest Evaluation Agent")
-
-    mission = input("\nEnter Mission: ")
-
-    prompt_used = input("\nEnter Prompt Used: ")
-
-    ai_output = input("\nEnter AI Output: ")
-
-    time_before = input("\nTime Before AI (minutes): ")
-
-    time_after = input("\nTime After AI (minutes): ")
-
-    fact_checking = input("\nFact Checking: ")
-
-    creative_approach = input("\nCreative Approach: ")
-
-    submission = f"""
-PROMPT USED:
-{prompt_used}
-
-AI OUTPUT:
-{ai_output}
-
-TIME BEFORE AI:
-{time_before} minutes
-
-TIME AFTER AI:
-{time_after} minutes
-
-FACT CHECKING:
-{fact_checking}
-
-CREATIVE APPROACH:
-{creative_approach}
-"""
-
-    print("\nEvaluating submission...")
-
-    result = evaluate_mission(mission, submission)
-
-    print("\n========================================")
-
-    for criterion in [
-        "prompt_quality",
-        "output_quality",
-        "time_saved",
-        "fact_checking",
-        "creativity"
-    ]:
-
-        print(
-            f"{criterion.replace('_', ' ').title()}: "
-            f"{result[criterion]['score']} /10"
-        )
-
-        print(
-            f"Reason: {result[criterion]['reason']}"
-        )
-
-        print()
-
-    print("----------------------------------------")
-
-    print(f"TOTAL XP: {result['total_xp']} /50")
-
-    print("\nOVERALL FEEDBACK:")
-    print(result["overall_feedback"])
-
-    print("\nIMPROVEMENT SUGGESTIONS:")
-
-    for suggestion in result["improvement_suggestions"]:
-        print(f"- {suggestion}")
-
-    print("========================================")
+    print("Is file ko direct run karne ke liye API key zaroori hai.")
